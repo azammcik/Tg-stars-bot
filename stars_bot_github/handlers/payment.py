@@ -85,7 +85,7 @@ async def successful_payment(message: Message, bot: Bot):
 
     await message.answer(
         f"✅ To'lov qabul qilindi! Buyurtma #{order_id} tasdiqlandi.\n"
-        f"Tez orada mahsulot yetkazib beriladi.",
+        f"Tez orada operatorlarimiz buyurtmani tasdiqlashadi!",
         reply_markup=main_menu_kb(),
     )
 
