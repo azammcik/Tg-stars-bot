@@ -12,6 +12,8 @@ ADMIN_IDS = [
 CARD_NUMBER = os.getenv("CARD_NUMBER", "0000 0000 0000 0000")
 CARD_HOLDER = os.getenv("CARD_HOLDER", "F.I.Sh.")
 
+# Railway / Docker uchun /data papkasi tavsiya etiladi (persistent volume)
+# Lokal ishlatganda oddiy "bot.db" ham ishlaydi
 DB_PATH = os.getenv("DB_PATH", "bot.db")
 
 # --- Mahsulotlar katalogi ---

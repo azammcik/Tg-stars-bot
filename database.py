@@ -1,5 +1,6 @@
 import aiosqlite
 import logging
+import os
 from datetime import datetime
 from config import DB_PATH
 
@@ -41,7 +42,16 @@ CREATE TABLE IF NOT EXISTS users (
 """
 
 
+def _ensure_db_dir():
+    """Bazani saqlash uchun papka mavjudligini ta'minlaydi."""
+    db_dir = os.path.dirname(os.path.abspath(DB_PATH))
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+        logger.info("DB papkasi yaratildi: %s", db_dir)
+
+
 async def init_db():
+    _ensure_db_dir()
     async with aiosqlite.connect(DB_PATH) as db:
         # WAL rejimi — bir vaqtda o'qish/yozish tezligini va barqarorligini oshiradi
         await db.execute("PRAGMA journal_mode=WAL;")

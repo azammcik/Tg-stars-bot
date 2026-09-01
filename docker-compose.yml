@@ -6,5 +6,9 @@ services:
     env_file:
       - .env
     volumes:
-      - ./bot.db:/app/bot.db
-      - ./bot.log:/app/bot.log
+      - bot_data:/data
+    environment:
+      - DB_PATH=/data/bot.db
+
+volumes:
+  bot_data:
