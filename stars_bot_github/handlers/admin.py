@@ -1,14 +1,15 @@
 import csv
 import io
+import os
 import logging
 
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, BufferedInputFile
+from aiogram.types import CallbackQuery, Message, BufferedInputFile, FSInputFile
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 import database as db
-from config import ADMIN_IDS
+from config import ADMIN_IDS, DB_PATH
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ HELP_TEXT = (
     "/user ID — bitta foydalanuvchi haqida to'liq ma'lumot\n"
     "/stats — bot bo'yicha umumiy statistika\n"
     "/export — foydalanuvchilar ro'yxatini CSV fayl sifatida yuklab olish\n"
+    "/backup — bazaning (bot.db) to'liq nusxasini fayl sifatida yuklab olish\n"
     "/broadcast matn — barcha foydalanuvchilarga xabar yuborish"
 )
 
@@ -129,6 +131,30 @@ async def export_users(message: Message):
     file_bytes = buffer.getvalue().encode("utf-8-sig")  # Excel'da to'g'ri ochilishi uchun
     file = BufferedInputFile(file_bytes, filename="users_export.csv")
     await message.answer_document(file, caption=f"👥 Jami {len(users)} ta foydalanuvchi")
+
+
+@router.message(Command("backup"))
+async def backup_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not os.path.exists(DB_PATH):
+        await message.answer(f"⚠️ Baza fayli topilmadi: {DB_PATH}")
+        return
+
+    try:
+        file = FSInputFile(DB_PATH, filename="bot.db")
+        await message.answer_document(
+            file,
+            caption=(
+                "🗄 Bazaning to'liq nusxasi (bot.db).\n\n"
+                "Bu faylni SQLite ochuvchi dastur bilan (masalan DB Browser for SQLite) "
+                "kompyuteringizda ochishingiz mumkin."
+            ),
+        )
+    except Exception as e:
+        logger.error("Backup yuborishda xatolik: %s", e)
+        await message.answer(f"⚠️ Bazani yuborishda xatolik yuz berdi: {e}")
 
 
 @router.message(Command("broadcast"))
