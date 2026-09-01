@@ -1,15 +1,15 @@
 import csv
 import io
+import os
 import logging
 
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, BufferedInputFile
+from aiogram.types import CallbackQuery, Message, BufferedInputFile, FSInputFile
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 import database as db
-from config import ADMIN_IDS
-from locales import t, get_user_lang
+from config import ADMIN_IDS, DB_PATH
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ HELP_TEXT = (
     "/user ID — bitta foydalanuvchi haqida to'liq ma'lumot\n"
     "/stats — bot bo'yicha umumiy statistika\n"
     "/export — foydalanuvchilar ro'yxatini CSV fayl sifatida yuklab olish\n"
+    "/backup — bazaning (bot.db) to'liq nusxasini fayl sifatida yuklab olish\n"
     "/broadcast matn — barcha foydalanuvchilarga xabar yuborish"
 )
 
@@ -94,9 +95,8 @@ async def list_users(message: Message):
         name = " ".join(filter(None, [u["first_name"], u["last_name"]])) or "—"
         username = f"@{u['username']}" if u["username"] else "—"
         phone = u["phone_number"] or "—"
-        lang = u["lang"] if "lang" in u.keys() and u["lang"] else "uz"
         lines.append(
-            f"• ID: <code>{u['user_id']}</code> | {name} | {username} | 📱 {phone} | 🌐 {lang}"
+            f"• ID: <code>{u['user_id']}</code> | {name} | {username} | 📱 {phone}"
         )
     if len(users) > 50:
         lines.append(f"\n... va yana {len(users) - 50} ta.")
@@ -120,18 +120,41 @@ async def export_users(message: Message):
     writer = csv.writer(buffer)
     writer.writerow(
         ["user_id", "username", "first_name", "last_name", "phone_number",
-         "language_code", "lang", "first_seen", "last_seen"]
+         "language_code", "first_seen", "last_seen"]
     )
     for u in users:
-        lang = u["lang"] if "lang" in u.keys() else "uz"
         writer.writerow(
             [u["user_id"], u["username"], u["first_name"], u["last_name"],
-             u["phone_number"], u["language_code"], lang, u["first_seen"], u["last_seen"]]
+             u["phone_number"], u["language_code"], u["first_seen"], u["last_seen"]]
         )
 
-    file_bytes = buffer.getvalue().encode("utf-8-sig")
+    file_bytes = buffer.getvalue().encode("utf-8-sig")  # Excel'da to'g'ri ochilishi uchun
     file = BufferedInputFile(file_bytes, filename="users_export.csv")
     await message.answer_document(file, caption=f"👥 Jami {len(users)} ta foydalanuvchi")
+
+
+@router.message(Command("backup"))
+async def backup_db(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    if not os.path.exists(DB_PATH):
+        await message.answer(f"⚠️ Baza fayli topilmadi: {DB_PATH}")
+        return
+
+    try:
+        file = FSInputFile(DB_PATH, filename="bot.db")
+        await message.answer_document(
+            file,
+            caption=(
+                "🗄 Bazaning to'liq nusxasi (bot.db).\n\n"
+                "Bu faylni SQLite ochuvchi dastur bilan (masalan DB Browser for SQLite) "
+                "kompyuteringizda ochishingiz mumkin."
+            ),
+        )
+    except Exception as e:
+        logger.error("Backup yuborishda xatolik: %s", e)
+        await message.answer(f"⚠️ Bazani yuborishda xatolik yuz berdi: {e}")
 
 
 @router.message(Command("broadcast"))
@@ -203,14 +226,10 @@ async def _confirm_order(message: Message, bot: Bot):
 
     await db.set_order_status(order_id, "confirmed")
     await message.answer(f"✅ Buyurtma #{order_id} tasdiqlandi.")
-
-    # Foydalanuvchiga uning tilida xabar
-    user = await db.get_user(order["user_id"])
-    user_lang = get_user_lang(user)
     try:
         await bot.send_message(
             order["user_id"],
-            t("order_confirmed_user", user_lang, order_id=order_id),
+            f"✅ Buyurtmangiz #{order_id} tasdiqlandi! Tez orada mahsulot yetkaziladi.",
         )
     except TelegramForbiddenError:
         await db.set_user_blocked(order["user_id"], True)
@@ -234,13 +253,10 @@ async def _reject_order(message: Message, bot: Bot):
 
     await db.set_order_status(order_id, "rejected")
     await message.answer(f"❌ Buyurtma #{order_id} rad etildi.")
-
-    user = await db.get_user(order["user_id"])
-    user_lang = get_user_lang(user)
     try:
         await bot.send_message(
             order["user_id"],
-            t("order_rejected_user", user_lang, order_id=order_id),
+            f"❌ Buyurtmangiz #{order_id} rad etildi. Savollar bo'lsa, admin bilan bog'laning.",
         )
     except TelegramForbiddenError:
         await db.set_user_blocked(order["user_id"], True)
@@ -271,15 +287,13 @@ async def user_detail(message: Message):
     name = " ".join(filter(None, [user["first_name"], user["last_name"]])) or "—"
     username = f"@{user['username']}" if user["username"] else "—"
     blocked_note = "\n🚫 Botni bloklagan" if user["is_blocked"] else ""
-    lang = user["lang"] if "lang" in user.keys() and user["lang"] else "uz"
 
     text = (
         f"👤 <b>Foydalanuvchi ma'lumotlari</b>\n\n"
         f"ID: <code>{user['user_id']}</code>\n"
         f"Ism: {name}\n"
         f"Username: {username}\n"
-        f"Til (Telegram): {user['language_code'] or '—'}\n"
-        f"Bot tili: {lang}\n"
+        f"Til: {user['language_code'] or '—'}\n"
         f"Telefon: {user['phone_number'] or 'ulashilmagan'}\n"
         f"Birinchi murojaat: {user['first_seen']}\n"
         f"Oxirgi faollik: {user['last_seen']}"
@@ -294,17 +308,15 @@ async def user_detail(message: Message):
 @router.callback_query(F.data.startswith("admin_confirm_"))
 async def confirm_via_button(callback: CallbackQuery, bot: Bot):
     if not is_admin(callback.from_user.id):
-        await callback.answer(t("admin_no_permission", "uz"), show_alert=True)
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
     order_id = int(callback.data.removeprefix("admin_confirm_"))
     order = await db.get_order(order_id)
     if not order:
-        await callback.answer(t("admin_order_not_found", "uz"), show_alert=True)
+        await callback.answer("Buyurtma topilmadi.", show_alert=True)
         return
     if order["status"] != "pending":
-        await callback.answer(
-            t("admin_already_processed", "uz", status=order["status"]), show_alert=True
-        )
+        await callback.answer(f"Bu buyurtma allaqachon '{order['status']}' holatida.", show_alert=True)
         return
 
     await db.set_order_status(order_id, "confirmed")
@@ -314,35 +326,30 @@ async def confirm_via_button(callback: CallbackQuery, bot: Bot):
         )
     except TelegramBadRequest:
         pass
-
-    user = await db.get_user(order["user_id"])
-    user_lang = get_user_lang(user)
     try:
         await bot.send_message(
             order["user_id"],
-            t("order_confirmed_user", user_lang, order_id=order_id),
+            f"✅ Buyurtmangiz #{order_id} tasdiqlandi! Tez orada mahsulot yetkaziladi.",
         )
     except TelegramForbiddenError:
         await db.set_user_blocked(order["user_id"], True)
     except Exception as e:
         logger.warning("Foydalanuvchiga xabar yuborilmadi (order %s): %s", order_id, e)
-    await callback.answer(t("admin_confirmed", "uz"))
+    await callback.answer("Tasdiqlandi!")
 
 
 @router.callback_query(F.data.startswith("admin_reject_"))
 async def reject_via_button(callback: CallbackQuery, bot: Bot):
     if not is_admin(callback.from_user.id):
-        await callback.answer(t("admin_no_permission", "uz"), show_alert=True)
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
     order_id = int(callback.data.removeprefix("admin_reject_"))
     order = await db.get_order(order_id)
     if not order:
-        await callback.answer(t("admin_order_not_found", "uz"), show_alert=True)
+        await callback.answer("Buyurtma topilmadi.", show_alert=True)
         return
     if order["status"] != "pending":
-        await callback.answer(
-            t("admin_already_processed", "uz", status=order["status"]), show_alert=True
-        )
+        await callback.answer(f"Bu buyurtma allaqachon '{order['status']}' holatida.", show_alert=True)
         return
 
     await db.set_order_status(order_id, "rejected")
@@ -352,16 +359,13 @@ async def reject_via_button(callback: CallbackQuery, bot: Bot):
         )
     except TelegramBadRequest:
         pass
-
-    user = await db.get_user(order["user_id"])
-    user_lang = get_user_lang(user)
     try:
         await bot.send_message(
             order["user_id"],
-            t("order_rejected_user", user_lang, order_id=order_id),
+            f"❌ Buyurtmangiz #{order_id} rad etildi. Savollar bo'lsa, admin bilan bog'laning.",
         )
     except TelegramForbiddenError:
         await db.set_user_blocked(order["user_id"], True)
     except Exception as e:
         logger.warning("Foydalanuvchiga xabar yuborilmadi (order %s): %s", order_id, e)
-    await callback.answer(t("admin_rejected", "uz"))
+    await callback.answer("Rad etildi!")
