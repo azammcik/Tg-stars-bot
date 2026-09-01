@@ -1,0 +1,15 @@
+[Unit]
+Description=Telegram Stars & Premium sotuvchi bot
+After=network.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/stars_bot
+ExecStart=/opt/stars_bot/venv/bin/python /opt/stars_bot/bot.py
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/stars_bot/.env
+
+[Install]
+WantedBy=multi-user.target
